@@ -155,6 +155,119 @@ class Region():
     def dump(self):
         print "({}, {}) ({}, {}), ({}, {})".format(self.mark1, self.mark2, self.index1, self.index2, self.seqpos1, self.seqpos2)
 
+## Dialogs
+
+class Dialog(tk.Toplevel):
+    """Taken from: http://effbot.org/tkinterbook/tkinter-dialog-windows.htm"""
+    fields = []
+    headers = []
+    dblClick = ""
+    extra = {}                # for whatever
+
+    def __init__(self, parent, title=None, fields=None, headers=None, dblClick="", extra={}):
+        tk.Toplevel.__init__(self, parent)
+        self.transient(parent)
+        if title:
+            self.title(title)
+        self.parent = parent
+        self.result = None
+        if fields != None:
+            self.fields = fields
+        if headers!= None:
+            self.headers = headers
+        self.dblClick = dblClick
+        self.extra = extra
+        frame = tk.Frame(self)
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        frame.grid(row=0, column=0, sticky=tk.N+tk.S+tk.E+tk.W)
+        self.initial_focus = self.body(frame)
+        # body.pack(padx=10, pady=10)
+        self.buttonbox()
+        self.grab_set()
+        if not self.initial_focus:
+            self.initial_focus = self
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.geometry("+%d+%d" % (parent.winfo_rootx()+50,
+                                  parent.winfo_rooty()+50))
+        self.initial_focus.focus_set()
+        self.wait_window(self)
+
+    # construction hooks
+
+    def body(self, master):
+        # create dialog body.  return widget that should have
+        # initial focus.  this method should be overridden
+        pass
+
+    def buttonbox(self):
+        # add standard button box. override if you don't want the
+        # standard buttons
+
+        box = tk.Frame(self)
+        box.rowconfigure(0, weight=1)
+        w = tk.Button(box, text="OK", width=10, command=self.ok, default=tk.ACTIVE)
+        w.grid(row=0, column=0, sticky=tk.E, padx=5, pady=5)
+        # w.pack(side=LEFT, padx=5, pady=5)
+        w = tk.Button(box, text="Cancel", width=10, command=self.cancel)
+        w.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        #w.pack(side=LEFT, padx=5, pady=5)
+
+        self.bind("<Return>", self.ok)
+        self.bind("<Escape>", self.cancel)
+
+        box.grid(sticky=tk.S)
+
+    # standard button semantics
+
+    def ok(self, event=None):
+        if not self.validate():
+            self.initial_focus.focus_set() # put focus back
+            return
+
+        self.withdraw()
+        self.update_idletasks()
+        self.apply()
+        self.cancel()
+
+    def cancel(self, event=None):
+        # put focus back to the parent window
+        self.parent.focus_set()
+        self.destroy()
+
+    def action(self, event=None):
+        pass                    # override
+    
+    # command hooks
+
+    def validate(self):
+        return 1 # override
+
+    def apply(self):
+        pass # override
+
+class RandomSeqDialog(Dialog):
+    name = None
+    size = None
+
+    def body(self, master):
+        self.name = tk.StringVar()
+        self.name.set("RandomSeq")
+        self.size = tk.IntVar()
+        self.size.set(10000)
+
+        master.columnconfigure(1, weight=1)
+        tk.Label(master, text='Name:', anchor=tk.W).grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        tk.Entry(master, width=10, textvariable=self.name).grid(row=0, column=1, sticky=tk.E, padx=5, pady=5)
+        tk.Label(master, text='Length:', anchor=tk.W).grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        e = tk.Entry(master, width=10, textvariable=self.size, justify=tk.RIGHT)
+        e.grid(row=1, column=1, sticky=tk.E, padx=5, pady=5)
+        return e
+
+    def apply(self):
+        self.result = {'length': self.size.get(),
+                       'name': self.name.get()}
+
 ## Top-level application object 
 
 APP = None
@@ -209,7 +322,7 @@ class Application(tk.Frame):
 
         filemenu = tk.Menu(self.MB, tearoff=0)
         filemenu.add_command(label="Open...", command=self.openFile, underline=0, accelerator="F9")
-        filemenu.add_command(label="New random seq", command=self.newRandom, underline=0)
+        filemenu.add_command(label="Random seq...", command=self.newRandom, underline=0)
         filemenu.add_command(label="Save as...", underline=0)
         filemenu.add_separator()
         filemenu.add_command(label="Exit", command=self.quit, underline=1)
@@ -281,7 +394,7 @@ class Application(tk.Frame):
         self.dummywin.config(font=self.seqfont)
         self.dummywin.config(state=tk.DISABLED)
 
-        self.rulerwin = tk.Text(self, relief=tk.FLAT, bg="#D9D9D9", takefocus=0, padx=0, pady=0, wrap=tk.NONE)
+        self.rulerwin = tk.Text(self, relief=tk.FLAT, bg="#D9D9D9", takefocus=0, padx=0, pady=0, wrap=tk.NONE, height=2)
         self.rulerwin.config(font=self.seqfont)
 
         self.poswin = tk.Text(self, width=10, relief=tk.FLAT, bg="#D9D9D9", takefocus=0, padx=0, pady=0, spacing1=3)
@@ -350,6 +463,8 @@ class Application(tk.Frame):
             self.seqinfo.selected.set("{} - {}".format(seq.indexToSeqpos(mw.index(tk.SEL_FIRST)) + 1, seq.indexToSeqpos(mw.index(tk.SEL_LAST))))
 
     def banner(self):
+        self.dummywin.config(height=0)
+        self.rulerwin.config(height=0)
         mw = self.mainwin
         mw.config(state=tk.NORMAL)
         mw.insert(tk.INSERT, """
@@ -426,9 +541,12 @@ Use File -> Open... to load a sequence file.
             self.initialize(SO)
 
     def newRandom(self, event=None):
-        SO = Sequence()
-        SO.initRandom(10000)
-        self.initialize(SO)
+        result = RandomSeqDialog(self).result
+        if result:
+            SO = Sequence()
+            SO.initRandom(result['length'])
+            SO.name = result['name']
+            self.initialize(SO)
 
     def selectAll(self, event=None):
         self.mainwin.tag_add('sel', '1.0', tk.END)
